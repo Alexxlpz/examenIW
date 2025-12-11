@@ -1,0 +1,15 @@
+pydantic
+environs
+fastapi
+uvicorn
+jinja2
+python-multipart
+pymongo
+httpx
+authlib
+itsdangerous
+cloudinary
+starlette
+python-dotenv
+motor
+email-validator
