@@ -13,17 +13,20 @@ from environs import Env
 from bson import ObjectId
 from datetime import datetime
 
+from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
+
 # --- TUS MODELOS ---
 from usuario import Usuario
 from evento import Evento
 from visita import Visita
 
 env = Env()
-env.read_env()
+env.read_env(path=".env", override=True)
 
 app = FastAPI(title="Examen IW - Clean Code")
 
 # 1. MIDDLEWARE
+app.add_middleware(ProxyHeadersMiddleware, trusted_hosts=["*"])
 app.add_middleware(SessionMiddleware, secret_key=env("SECRET_KEY", "secreto"))
 
 # 2. CARGAMOS EL DIRECTORIO DE TEMPLATES
@@ -86,9 +89,15 @@ async def home(request: Request):
 
 @app.get("/login")
 async def login(request: Request):
-    redirect_uri = request.url_for('auth')
-    return await oauth.google.authorize_redirect(request, redirect_uri)
+    base_url_env = env("BASE_URL", None)
 
+    if base_url_env:
+        redirect_uri = f"{base_url_env}/auth"
+    else:
+        # En local: detecta http://localhost:8000/auth automáticamente
+        redirect_uri = request.url_for('auth')
+
+    return await oauth.google.authorize_redirect(request, redirect_uri)
 
 @app.get("/auth")
 async def auth(request: Request):
