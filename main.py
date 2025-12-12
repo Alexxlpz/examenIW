@@ -81,7 +81,7 @@ def get_usuario_actual(request: Request):
 @app.get("/", response_class=HTMLResponse)
 async def home(request: Request):
     if get_usuario_actual(request):
-        return RedirectResponse(url="/mapa")
+        return RedirectResponse(url="/resenas")
     return templates.TemplateResponse("login.html", {"request": request})
 
 
@@ -129,25 +129,6 @@ async def logout(request: Request):
 
 
 # --- LÓGICA PRINCIPAL ---
-
-@app.get("/mapa", response_class=HTMLResponse)
-async def ver_mapa(request: Request):
-    usuario = get_usuario_actual(request)
-    if not usuario: return RedirectResponse("/")
-
-    # recuperar todas las reseñas para ponerlas en el mapa
-    resenas = []
-    async for doc in col_resenas.find():
-        doc["id"] = str(doc["_id"])
-        del doc["_id"]
-        resenas.append(doc)
-
-    return templates.TemplateResponse("mapa.html", {
-        "request": request,
-        "usuario": usuario,
-        "resenas_json": json.dumps(resenas, default=str)
-    })
-
 
 @app.get("/resenas", response_class=HTMLResponse)
 async def listar_resenas(request: Request):
