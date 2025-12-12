@@ -1,0 +1,137 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="row mb-4 align-items-center">
+    <div class="col-md-8">
+        <h2 class="text-primary fw-bold">Explora las Reseñas</h2>
+        <p class="text-muted">Mapa y listado de experiencias.</p>
+    </div>
+    <div class="col-md-4 text-end">
+        <a href="/resenas/crear" class="btn btn-success shadow-sm">
+            ➕ Nueva Reseña
+        </a>
+    </div>
+</div>
+
+<div class="card shadow-sm mb-5 border-0">
+    <div class="card-body p-0">
+        <div class="p-3 bg-light border-bottom">
+            <div class="input-group" style="max-width: 500px;">
+                <input type="text" id="inputBuscar" class="form-control" placeholder="🔍 Buscar ciudad o calle para centrar mapa...">
+                <button onclick="buscarYCentrar()" class="btn btn-primary">Buscar</button>
+            </div>
+        </div>
+        <div id="map" style="height: 400px; width: 100%;"></div>
+    </div>
+</div>
+
+<h3 class="mb-3 text-secondary">Listado Detallado</h3>
+<div class="row">
+    {% for r in resenas %}
+    <div class="col-md-6 col-lg-4 mb-4">
+        <div class="card h-100 shadow-sm border-0 hover-card">
+            {% if r.imagen_url %}
+                <img src="{{ r.imagen_url }}" class="card-img-top" alt="Imagen del sitio" style="height: 200px; object-fit: cover;">
+            {% else %}
+                <div class="card-img-top bg-light d-flex align-items-center justify-content-center" style="height: 200px;">
+                    <span class="text-muted">📷 Sin imagen</span>
+                </div>
+            {% endif %}
+
+            <div class="card-body">
+                <h5 class="card-title fw-bold text-dark">{{ r.nombre_establecimiento }}</h5>
+
+                <div class="mb-2 text-warning">
+                    {% for i in range(r.valoracion) %}★{% endfor %}
+                    <span class="text-muted small">({{ r.valoracion }}/5)</span>
+                </div>
+
+                <p class="card-text text-secondary small mb-1">
+                    📍 {{ r.direccion }}
+                </p>
+            </div>
+
+            <div class="card-footer bg-white border-top-0 pb-3">
+                <div class="d-grid">
+                    <a href="/resenas/detalle/{{ r.id }}" class="btn btn-outline-primary btn-sm">
+                        Ver Detalles
+                    </a>
+                </div>
+            </div>
+        </div>
+    </div>
+    {% else %}
+    <div class="col-12 text-center mt-5">
+        <div class="alert alert-info">
+            <h4>📭 Aún no hay reseñas</h4>
+            <p>¡Sé el primero en inaugurar el mapa!</p>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+    // 1. Inicializar el mapa
+    var map = L.map('map').setView([40.416, -3.703], 6); // Centro España
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '© OpenStreetMap contributors'
+    }).addTo(map);
+
+    // 2. Cargar datos del backend (JSON inyectado por Jinja)
+    var resenasData = JSON.parse('{{ resenas_json | safe }}');
+
+    // 3. Pintar marcadores
+    resenasData.forEach(r => {
+        if(r.latitud && r.longitud) {
+            L.marker([r.latitud, r.longitud]).addTo(map)
+                .bindPopup(`
+                    <div style="text-align:center;">
+                        <b>${r.nombre_establecimiento}</b><br>
+                        ${"⭐".repeat(r.valoracion)}<br>
+                        <a href="/resenas/detalle/${r.id}">Ir a detalles</a>
+                    </div>
+                `);
+        }
+    });
+
+    // 4. Función de búsqueda (Geocoding) para centrar mapa
+    function buscarYCentrar() {
+        var dir = document.getElementById('inputBuscar').value;
+        if(!dir) return;
+
+        // Efecto visual de carga en el botón
+        var btn = document.querySelector('button[onclick="buscarYCentrar()"]');
+        var textoOriginal = btn.innerText;
+        btn.innerText = "Buscando...";
+
+        fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(dir)}`)
+            .then(res => res.json())
+            .then(data => {
+                btn.innerText = textoOriginal;
+                if(data.length > 0) {
+                    var lat = data[0].lat;
+                    var lon = data[0].lon;
+                    map.setView([lat, lon], 14);
+                    L.popup().setLatLng([lat, lon])
+                     .setContent("📍 Resultado de búsqueda")
+                     .openOn(map);
+                } else {
+                    alert("Dirección no encontrada ❌");
+                }
+            })
+            .catch(e => {
+                btn.innerText = textoOriginal;
+                console.error(e);
+            });
+    }
+</script>
+
+<style>
+    .hover-card:hover {
+        transform: translateY(-5px);
+        transition: transform 0.3s ease;
+        box-shadow: 0 10px 20px rgba(0,0,0,0.1) !important;
+    }
+</style>
+{% endblock %}

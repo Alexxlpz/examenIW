@@ -4,22 +4,20 @@ import cloudinary
 import cloudinary.uploader
 from fastapi import FastAPI, Request, Form, UploadFile, File
 from fastapi.responses import RedirectResponse, HTMLResponse
-from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
 from authlib.integrations.starlette_client import OAuth
 from motor.motor_asyncio import AsyncIOMotorClient
 from environs import Env
 from bson import ObjectId
-from datetime import datetime
-
 from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
+import time
 
 # --- TUS MODELOS ---
 from usuario import Usuario
-from evento import Evento
-from visita import Visita
+from resena import Resena
 
+# --- CONFIGURACIÓN APP ---
 env = Env()
 env.read_env(path=".env", override=True)
 
@@ -53,10 +51,10 @@ cloudinary.config(
 client = AsyncIOMotorClient(env("MONGO_URI"))
 db = client["ExamenDB"]
 
-usuarios_col = db["Usuarios"]
-eventos_col = db["Eventos"]
-visitas_col = db["Visitas"]
-
+#usuarios_col = db["Usuarios"]
+#eventos_col = db["Eventos"]
+#visitas_col = db["Visitas"]
+col_resenas = db["Resenas"]
 
 # FUNCIONES DE AYUDA
 
@@ -99,140 +97,154 @@ async def login(request: Request):
 
     return await oauth.google.authorize_redirect(request, redirect_uri)
 
+
 @app.get("/auth")
 async def auth(request: Request):
     try:
         token = await oauth.google.authorize_access_token(request)
         user_info = token.get('userinfo')
-        if not user_info: return HTMLResponse("Error Google")
 
-        # Usamos la variable 'usuarios_col'
-        usuario_existente = await usuarios_col.find_one({"email": user_info["email"]})
+        now = int(time.time())
+        expires_at = token.get("expires_at")
 
-        if usuario_existente:
-            await usuarios_col.update_one(
-                {"_id": usuario_existente["_id"]},
-                {"$set": {"nombre": user_info["name"]}}
-            )
-            usuario_db = Usuario(**usuario_existente)
-            usuario_db.nombre = user_info["name"]
-        else:
-            usuario_db = Usuario(nombre=user_info["name"], email=user_info["email"])
-            # model_dump para convertir el Pydantic a diccionario para Mongo
-            res = await usuarios_col.insert_one(usuario_db.model_dump(by_alias=True, exclude={"id"}))
-            usuario_db.id = str(res.inserted_id)
+        request.session["token_data"] = {
+            "access_token": token.get("access_token"),
+            "created_at": token.get("created_at") or now,
+            "expires_at": expires_at or (now + 3599) # que es lo que suele poner google de tardanza, esto lo pondremos por si algun casual da fallo pero no deberia
+        }
 
-        request.session["user"] = json.loads(usuario_db.model_dump_json(by_alias=True))
-        return RedirectResponse(url="/mapa")
+        usuario = Usuario(nombre=user_info["name"], email=user_info["email"])
+        request.session["user"] = json.loads(usuario.model_dump_json(by_alias=True))
+
+        return RedirectResponse(url="/resenas")
     except Exception as e:
         print(f"Error Auth: {e}")
-        return RedirectResponse(url="/")
+        return RedirectResponse("/")
 
 
 @app.get("/logout")
 async def logout(request: Request):
-    request.session.pop('user', None)
-    return RedirectResponse(url="/")
+    request.session.clear()
+    return RedirectResponse("/")
 
 
 # --- LÓGICA PRINCIPAL ---
 
-@app.post("/visitar")
-async def visitar_otro(email_destino: str = Form(...)):
-    return RedirectResponse(url=f"/mapa?target_email={email_destino}", status_code=303)
-
-
 @app.get("/mapa", response_class=HTMLResponse)
-async def ver_mapa(request: Request, target_email: str = None):
-    usuario_logueado = get_usuario_actual(request)
-    if not usuario_logueado: return RedirectResponse("/")
+async def ver_mapa(request: Request):
+    usuario = get_usuario_actual(request)
+    if not usuario: return RedirectResponse("/")
 
-    email_dueno = target_email if target_email else usuario_logueado.email #si estamos visitando a otro cojemos el tarjet (que es al que vamos a visitar) si no es nuestro propio email
-    es_propietario = (usuario_logueado.email == email_dueno) #si el email del usuario logueado es igual al email del target, entonces es el propietario, si no esta visitando y recortamos funcionalidad
-
-    lista_visitas = []
-
-    if es_propietario:
-        # A. LEER VISITAS (Usamos Pydantic para traer los datos limpios)
-        cursor = visitas_col.find({"anfitrion": email_dueno}).sort("timestamp", -1)
-        async for doc in cursor:
-            # Validamos con Pydantic al leer
-            v_obj = Visita(**doc)
-            # Para la vista, convertimos a dict y formateamos fecha
-            v_dict = v_obj.model_dump()
-            v_dict["timestamp"] = v_obj.timestamp.strftime("%d/%m/%Y %H:%M")
-            lista_visitas.append(v_dict)
-    else:
-        # B. REGISTRAR VISITA (Usamos Pydantic para crear)
-        # Creamos el objeto Visita
-        nueva_visita = Visita(
-            anfitrion=email_dueno,
-            visitante=usuario_logueado.nombre,
-            visitante_email=str(usuario_logueado.email)
-            # timestamp se pone solo gracias al default_factory en el modelo
-        )
-
-        # Insertamos usando la variable global 'visitas_col'
-        await visitas_col.insert_one(nueva_visita.model_dump(by_alias=True, exclude={"id"}))
-
-    # C. OBTENER EVENTOS (Variable global 'eventos_col')
-    eventos_list = []
-    cursor_ev = eventos_col.find({"creador_email": email_dueno})
-    async for doc in cursor_ev:
+    # recuperar todas las reseñas para ponerlas en el mapa
+    resenas = []
+    async for doc in col_resenas.find():
         doc["id"] = str(doc["_id"])
         del doc["_id"]
-        eventos_list.append(doc)
+        resenas.append(doc)
 
     return templates.TemplateResponse("mapa.html", {
         "request": request,
-        "usuario": usuario_logueado,
-        "target_email": email_dueno,
-        "es_propietario": es_propietario,
-        "eventos": eventos_list,
-        "eventos_json": json.dumps(eventos_list),
-        "visitas": lista_visitas
+        "usuario": usuario,
+        "resenas_json": json.dumps(resenas, default=str)
     })
 
 
-@app.post("/eventos/crear")
-async def crear_evento(
+@app.get("/resenas", response_class=HTMLResponse)
+async def listar_resenas(request: Request):
+    usuario = get_usuario_actual(request)
+    if not usuario: return RedirectResponse("/")
+
+    lista_resenas = []  # Para pintar las tarjetas con Jinja
+    lista_para_mapa = []  # Para pintar los marcadores con JS
+
+    async for doc in col_resenas.find():
+        # 1. Para el listado visual (Objetos Pydantic)
+        lista_resenas.append(Resena(**doc))
+
+        # 2. Para el mapa (Diccionarios serializables a JSON)
+        # Hacemos una copia para no afectar al objeto original
+        d = doc.copy()
+        d["id"] = str(d["_id"])  # Convertimos ObjectId a String
+        if "_id" in d: del d["_id"]
+        lista_para_mapa.append(d)
+
+    return templates.TemplateResponse("lista.html", {
+        "request": request,
+        "usuario": usuario,
+        "resenas": lista_resenas,
+        "resenas_json": json.dumps(lista_para_mapa, default=str)  # Serializamos fechas etc.
+    })
+
+
+@app.get("/resenas/crear", response_class=HTMLResponse)
+async def form_crear_resena(request: Request):
+    usuario = get_usuario_actual(request)
+    if not usuario: return RedirectResponse("/")
+    return templates.TemplateResponse("crear.html", {"request": request, "usuario": usuario})
+
+
+@app.post("/resenas/crear")
+async def crear_resena_db(
         request: Request,
         nombre: str = Form(...),
+        direccion: str = Form(...),
+        valoracion: int = Form(...),
         latitud: float = Form(...),
         longitud: float = Form(...),
         imagen: UploadFile = File(None)
 ):
     usuario = get_usuario_actual(request)
-    if not usuario: return RedirectResponse("/")
+    token_info = request.session.get("token_data")
+
+    if not usuario or not token_info: return RedirectResponse("/")
 
     url_img = subir_imagen_cloudinary(imagen)
 
-    nuevo_evento = Evento(
-        nombre=nombre,
+    now = int(time.time())
+
+    ts_emision = token_info.get("created_at") or now
+    ts_caducidad = token_info.get("expires_at") or (now + 3600)
+    nueva_resena = Resena(
+        nombre_establecimiento=nombre,
+        direccion=direccion,
+        valoracion=valoracion,
         latitud=latitud,
         longitud=longitud,
         imagen_url=url_img,
-        creador_email=str(usuario.email),
-        creador_nombre=usuario.nombre
+        autor_nombre=usuario.nombre,
+        autor_email=usuario.email,
+        token_oauth=token_info.get("access_token", "TOKEN_NO_DISPONIBLE"),
+
+        fecha_emision_token=ts_emision,
+        fecha_caducidad_token=ts_caducidad
     )
 
-    # Variable global 'eventos_col'
-    await eventos_col.insert_one(nuevo_evento.model_dump(by_alias=True, exclude={"id"}))
-    return RedirectResponse(url="/mapa", status_code=303)
+    await col_resenas.insert_one(nueva_resena.model_dump(by_alias=True, exclude={"id"}))
+
+    return RedirectResponse("/resenas", status_code=303)
 
 
-@app.post("/eventos/borrar/{id_evento}")
-async def borrar_evento(id_evento: str, request: Request):
+@app.get("/resenas/detalle/{id_resena}", response_class=HTMLResponse)
+async def detalle_resena(request: Request, id_resena: str):
     usuario = get_usuario_actual(request)
     if not usuario: return RedirectResponse("/")
 
-    # Variable global 'eventos_col'
-    await eventos_col.delete_one({
-        "_id": ObjectId(id_evento),
-        "creador_email": usuario.email
-    })
-    return RedirectResponse(url="/mapa", status_code=303)
+    doc = await col_resenas.find_one({"_id": ObjectId(id_resena)})
+    if not doc: return HTMLResponse("Reseña no encontrada", 404)
 
+    resena = Resena(**doc)
+
+    fechas = {
+        "emision": resena.fecha_emision_token,
+        "caducidad": resena.fecha_caducidad_token
+    }
+
+    return templates.TemplateResponse("detalle.html", {
+        "request": request,
+        "usuario": usuario,
+        "r": resena,
+        "fechas": fechas
+    })
 
 if __name__ == "__main__":
     uvicorn.run("main:app", host="127.0.0.1", port=8000, reload=True)

@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="card shadow">
+    <div class="card-header bg-info text-white">
+        <h3>{{ r.nombre_establecimiento }}</h3>
+    </div>
+    <div class="card-body">
+        <div class="row">
+            <div class="col-md-6">
+                <p><b>Dirección:</b> {{ r.direccion }}</p>
+                <p><b>Coordenadas:</b> {{ r.latitud }}, {{ r.longitud }}</p>
+                <p><b>Valoración:</b> <span class="badge bg-warning text-dark">{{ r.valoracion }}/5</span></p>
+                <hr>
+                <h5 class="text-secondary">👤 Autoría y Seguridad (OAuth)</h5>
+                <ul class="list-group">
+                    <li class="list-group-item"><b>Autor:</b> {{ r.autor_nombre }} ({{ r.autor_email }})</li>
+                    <li class="list-group-item"><b>Token (Hash):</b> <code style="word-break:break-all;">{{ r.token_oauth }}</code></li>
+                    <li class="list-group-item"><b>Emisión Token:</b> {{ fechas.emision }}</li>
+                    <li class="list-group-item"><b>Caducidad Token:</b> {{ fechas.caducidad }}</li>
+                </ul>
+            </div>
+            <div class="col-md-6 text-center">
+                {% if r.imagen_url %}
+                    <img src="{{ r.imagen_url }}" class="img-fluid rounded shadow-sm" alt="Foto local">
+                {% else %}
+                    <div class="alert alert-secondary">Sin imagen</div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+    <div class="card-footer">
+        <a href="/resenas" class="btn btn-secondary">Volver al listado</a>
+    </div>
+</div>
+{% endblock %}

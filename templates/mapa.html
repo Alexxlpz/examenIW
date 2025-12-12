@@ -1,168 +1,44 @@
-<!DOCTYPE html>
-<html>
-<head>
-    <title>Kalendas - Mapa de {{ target_email }}</title>
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+{% extends "base.html" %}
+{% block content %}
+<h2>Mapa de Reseñas</h2>
 
-    <style>
-        body { font-family: "Segoe UI", sans-serif; padding: 20px; background-color: #f9f9f9; }
-
-        /* Estilos Estructurales del Examen */
-        #map { height: 500px; width: 100%; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
-        .container-custom { display: flex; gap: 20px; margin-top: 20px; }
-        .sidebar { width: 30%; background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
-        .main { width: 70%; }
-
-        /* Inputs modernos */
-        input[type="text"], input[type="email"], input[type="file"] {
-            width: 100%; padding: 8px; margin-bottom: 10px; border: 1px solid #ddd; border-radius: 4px;
-        }
-        button {
-            width: 100%; padding: 10px; background-color: #0d6efd; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold;
-        }
-        button:hover { background-color: #0b5ed7; }
-
-        .visit-item { border-bottom: 1px solid #eee; padding: 8px 0; font-size: 0.9em; color: #555; }
-        .marker-img { width: 100px; display: block; margin-top: 5px; border-radius: 4px; }
-    </style>
-</head>
-<body>
-
-    <div style="display:flex; justify-content:space-between; align-items:center;">
-        <h2>🗺️ Mapa de: <span style="color:#0d6efd">{{ target_email }}</span></h2>
-        <div>
-            <span class="me-3">Hola, <b>{{ usuario.nombre }}</b></span>
-            <a href="/logout" class="btn btn-outline-danger btn-sm" style="width: auto;">Cerrar Sesión</a>
-        </div>
+<div class="row mb-3">
+    <div class="col-md-6 d-flex gap-2">
+        <input type="text" id="inputBuscar" class="form-control" placeholder="Dirección postal para centrar mapa...">
+        <button onclick="buscarYCentrar()" class="btn btn-primary">Buscar</button>
     </div>
+</div>
 
-    <div class="container-custom">
-        <div class="main">
-            <div id="map"></div>
-        </div>
+<div id="map" style="height: 500px; border-radius: 10px;"></div>
 
-        <div class="sidebar">
-            {% if es_propietario %}
-                <h3>Añadir Marcador</h3>
-                <form action="/eventos/crear" method="post" enctype="multipart/form-data" onsubmit="return validarCoords()">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+    var map = L.map('map').setView([40.416, -3.703], 6); // Ponemos com centro españa para que no se centre por ahi lejos
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
 
-                    <label>Lugar:</label>
-                    <div style="display: flex; gap: 5px;">
-                        <input type="text" id="direccionInput" name="nombre" placeholder="Ciudad o País" required>
-                        <button type="button" onclick="buscarDireccion()" style="width: 40px; background:#eee; color:#333; border:1px solid #ddd;">🔍</button>
-                    </div>
-                    <small id="statusBusqueda" style="color: grey; display: block; margin-bottom: 10px; font-size: 0.8em;">Pulsa la lupa para guardar coordenadas.</small>
+    var resenas = JSON.parse('{{ resenas_json | safe }}');
+    
+    resenas.forEach(r => {
+        L.marker([r.latitud, r.longitud]).addTo(map)
+            .bindPopup(`<b>${r.nombre_establecimiento}</b><br>⭐ ${r.valoracion}/5<br><a href="/resenas/detalle/${r.id}">Ver detalles</a>`);
+    });
 
-                    <input type="hidden" name="latitud" id="lat">
-                    <input type="hidden" name="longitud" id="lon">
-
-                    <label>Imagen:</label>
-                    <input type="file" name="imagen" accept="image/*" required>
-
-                    <button type="submit">Añadir al Mapa</button>
-                </form>
-                <hr>
-            {% else %}
-                <div class="alert alert-warning">
-                    <i>Estás visitando el mapa de otro usuario.<br>No puedes editar.</i>
-                </div>
-                <a href="/mapa"><button style="background-color: #198754;">Volver a mi mapa</button></a>
-                <hr>
-            {% endif %}
-
-            <h3>Visitar otro mapa</h3>
-            <form action="/visitar" method="post">
-                <input type="email" name="email_destino" placeholder="Email del usuario (ej: profe@ucm.es)" required>
-                <button type="submit" style="background-color: #6c757d;">Ir</button>
-            </form>
-        </div>
-    </div>
-
-    <hr>
-
-    <h3>📸 Galería de Viajes</h3>
-    <div style="display:flex; flex-wrap:wrap; gap:15px; margin-bottom: 20px;">
-        {% for ev in eventos %}
-            <div style="border:1px solid #eee; padding:10px; background:white; border-radius:8px; width:150px; text-align:center;">
-                <div style="font-weight:bold; margin-bottom:5px; height: 25px; overflow: hidden;">{{ ev.nombre }}</div>
-                {% if ev.imagen_url %}
-                    <a href="{{ ev.imagen_url }}" target="_blank">
-                        <img src="{{ ev.imagen_url }}" style="height:100px; width: 100%; object-fit: cover;">
-                    </a>
-                {% endif %}
-
-                {% if es_propietario %}
-                <form action="/eventos/borrar/{{ ev.id }}" method="POST" onsubmit="return confirm('¿Borrar?');" style="margin-top:5px;">
-                    <button type="submit" style="background:none; border:none; color:red; font-size:0.8em; text-decoration:underline; width:auto; padding:0;">Eliminar</button>
-                </form>
-                {% endif %}
-            </div>
-        {% else %}
-            <p style="color:#777;">Este mapa está vacío.</p>
-        {% endfor %}
-    </div>
-
-    {% if es_propietario %}
-    <hr>
-    <h3>👀 Visitas Recibidas</h3>
-    <div style="max-height: 200px; overflow-y: auto; background: white; padding: 15px; border-radius: 8px;">
-        {% for v in visitas %}
-            <div class="visit-item">
-                <b>Fecha:</b> {{ v.timestamp }} |
-                <b>Visitante:</b> {{ v.visitante }} |
-                <b>Email:</b> {{ v.visitante_email }}
-            </div>
-        {% else %}
-            <p>No has recibido visitas aún.</p>
-        {% endfor %}
-    </div>
-    {% endif %}
-
-    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-    <script>
-        var map = L.map('map').setView([40.416, -3.703], 3);
-        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '&copy; OpenStreetMap' }).addTo(map);
-
-        // Cargar Marcadores (JSON desde Python)
-        var marcadores = JSON.parse('{{ eventos_json | safe }}');
-
-        marcadores.forEach(function(m) {
-            var popup = `<div style="text-align:center"><b>${m.nombre}</b><br><img src='${m.imagen_url}' class='marker-img'></div>`;
-            L.marker([m.latitud, m.longitud]).addTo(map).bindPopup(popup);
-        });
-
-        // Función de búsqueda (Geocoding)
-        function buscarDireccion() {
-            var dir = document.getElementById('direccionInput').value;
-            var st = document.getElementById('statusBusqueda');
-            if(!dir) return;
-
-            st.innerHTML = "⌛ Buscando...";
-            fetch('https://nominatim.openstreetmap.org/search?format=json&q=' + encodeURIComponent(dir))
-                .then(r => r.json())
-                .then(d => {
-                    if(d.length > 0) {
-                        document.getElementById('lat').value = d[0].lat;
-                        document.getElementById('lon').value = d[0].lon;
-                        st.innerHTML = "✅ Ubicación guardada.";
-                        st.style.color = "green";
-                        map.setView([d[0].lat, d[0].lon], 10);
-                        L.marker([d[0].lat, d[0].lon]).addTo(map).bindPopup("Nuevo destino").openPopup();
-                    } else {
-                        st.innerHTML = "❌ No encontrado.";
-                        st.style.color = "red";
-                    }
-                });
-        }
-
-        function validarCoords() {
-            if(!document.getElementById('lat').value) {
-                alert("Pulsa la lupa 🔍 para ubicar el lugar antes de añadirlo.");
-                return false;
-            }
-            return true;
-        }
-    </script>
-</body>
-</html>
+    function buscarYCentrar() {
+        var dir = document.getElementById('inputBuscar').value;
+        if(!dir) return;
+        
+        fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(dir)}`)
+            .then(res => res.json())
+            .then(data => {
+                if(data.length > 0) {
+                    var lat = data[0].lat;
+                    var lon = data[0].lon;
+                    map.setView([lat, lon], 14);
+                    L.popup().setLatLng([lat, lon]).setContent("📍 Buscaste aquí").openOn(map);
+                } else {
+                    alert("Dirección no encontrada");
+                }
+            });
+    }
+</script>
+{% endblock %}
